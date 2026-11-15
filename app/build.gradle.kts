@@ -49,6 +49,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
+    implementation("androidx.palette:palette-ktx:1.0.0")
 
     implementation("androidx.compose.ui:ui:1.12.0")
     implementation("androidx.compose.foundation:foundation:1.12.0")

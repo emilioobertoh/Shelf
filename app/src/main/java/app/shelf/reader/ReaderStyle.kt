@@ -1,5 +1,6 @@
 package app.shelf.reader
 
+import android.view.ActionMode
 import androidx.compose.ui.graphics.Color
 import app.shelf.data.ReaderSettings
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
@@ -94,10 +95,14 @@ fun ReaderSettings.toEpubPreferences(): EpubPreferences {
     )
 }
 
-/** Registers the bundled font files with Readium so books can use them. */
+/**
+ * Registers the bundled font files with Readium so books can use them.
+ * [selectionCallback] replaces the menu shown over selected text.
+ */
 @OptIn(ExperimentalReadiumApi::class)
-fun readerConfiguration(): EpubNavigatorFragment.Configuration =
+fun readerConfiguration(selectionCallback: ActionMode.Callback? = null): EpubNavigatorFragment.Configuration =
     EpubNavigatorFragment.Configuration {
+        selectionActionModeCallback = selectionCallback
         servedAssets = listOf("fonts/.*")
 
         addFontFamilyDeclaration(BookFonts.charter.family!!) {

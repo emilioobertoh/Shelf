@@ -1,6 +1,12 @@
 package app.shelf.reader
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
+import android.widget.Toast
 import android.view.View
 import android.view.WindowManager
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -75,7 +81,7 @@ class ReaderActivity : AppCompatActivity() {
             EpubNavigatorFactory(openBook.publication).createFragmentFactory(
                 initialLocator = openBook.initialLocator,
                 initialPreferences = openBook.settings.toEpubPreferences(),
-                configuration = readerConfiguration(),
+                configuration = readerConfiguration(selectionCallback),
             )
 
         super.onCreate(savedInstanceState)
@@ -140,6 +146,59 @@ class ReaderActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this) {
             if (ui.panel != ReaderPanel.None) ui.panel = ReaderPanel.None else finish()
         }
+    }
+
+    /**
+     * Menu over selected text. Readium replaces the system menu with this one,
+     * so Copy is added back by hand next to Share Quote.
+     */
+    private val selectionCallback = object : ActionMode.Callback {
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            menu.add(Menu.NONE, MENU_COPY, 0, android.R.string.copy)
+            menu.add(Menu.NONE, MENU_SHARE_QUOTE, 1, R.string.share_quote)
+            return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu) = false
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+            when (item.itemId) {
+                MENU_COPY -> withSelection { text ->
+                    getSystemService(ClipboardManager::class.java)
+                        .setPrimaryClip(ClipData.newPlainText(book.title, text))
+                    navigator.clearSelection()
+                    mode.finish()
+                }
+                MENU_SHARE_QUOTE -> withSelection { text -> shareQuote(text, mode) }
+                else -> return false
+            }
+            return true
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) {}
+    }
+
+    private fun withSelection(block: (String) -> Unit) {
+        lifecycleScope.launch {
+            val text = navigator.currentSelection()?.locator?.text?.highlight
+            if (!text.isNullOrBlank()) block(text)
+        }
+    }
+
+    private fun shareQuote(raw: String, mode: ActionMode) {
+        val quote = QuoteText.clean(raw)
+        if (quote.length > QuoteText.MAX_CHARS) {
+            // Keep the selection so it can be shortened instead of starting over.
+            Toast.makeText(
+                this,
+                getString(R.string.quote_too_long, quote.length, QuoteText.MAX_CHARS),
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        navigator.clearSelection()
+        mode.finish()
+        startActivity(QuoteShareActivity.intent(this, book.bookId, quote))
     }
 
     private fun observeLocation() {
@@ -237,5 +296,7 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val NAVIGATOR_TAG = "navigator"
+        private const val MENU_COPY = 1
+        private const val MENU_SHARE_QUOTE = 2
     }
 }

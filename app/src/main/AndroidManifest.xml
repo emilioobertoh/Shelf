@@ -7,6 +7,11 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
 
+    <!-- Lets Shelf see whether Instagram is installed (package visibility, Android 11+). -->
+    <queries>
+        <package android:name="com.instagram.android" />
+    </queries>
+
     <application
         android:name=".ShelfApp"
         android:allowBackup="true"
@@ -31,6 +36,22 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/Theme.Shelf.Reader" />
+
+        <activity
+            android:name=".reader.QuoteShareActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Shelf" />
+
+        <!-- Hands Story images to Instagram and the share sheet without making them public. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
 
         <!-- Fires the morning reminder and sets it again after reboots and clock changes. -->
         <receiver
