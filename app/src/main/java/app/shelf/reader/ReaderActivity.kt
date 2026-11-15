@@ -64,6 +64,8 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var root: FrameLayout
     private lateinit var overlay: ComposeView
     private var hideJob: Job? = null
+    /** The Copy / Share Quote menu while text is selected. */
+    private var selectionMode: ActionMode? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val openBook = shelf.openBook
@@ -144,7 +146,16 @@ class ReaderActivity : AppCompatActivity() {
         setSystemBarsVisible(false)
 
         onBackPressedDispatcher.addCallback(this) {
-            if (ui.panel != ReaderPanel.None) ui.panel = ReaderPanel.None else finish()
+            val selection = selectionMode
+            when {
+                // Back clears a selection first, as in other apps.
+                selection != null -> {
+                    navigator.clearSelection()
+                    selection.finish()
+                }
+                ui.panel != ReaderPanel.None -> ui.panel = ReaderPanel.None
+                else -> finish()
+            }
         }
     }
 
@@ -154,6 +165,7 @@ class ReaderActivity : AppCompatActivity() {
      */
     private val selectionCallback = object : ActionMode.Callback {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            selectionMode = mode
             menu.add(Menu.NONE, MENU_COPY, 0, android.R.string.copy)
             menu.add(Menu.NONE, MENU_SHARE_QUOTE, 1, R.string.share_quote)
             return true
@@ -175,7 +187,9 @@ class ReaderActivity : AppCompatActivity() {
             return true
         }
 
-        override fun onDestroyActionMode(mode: ActionMode) {}
+        override fun onDestroyActionMode(mode: ActionMode) {
+            if (selectionMode === mode) selectionMode = null
+        }
     }
 
     private fun withSelection(block: (String) -> Unit) {
@@ -208,6 +222,8 @@ class ReaderActivity : AppCompatActivity() {
                 var first = true
                 navigator.currentLocator.collect { locator ->
                     ui.locator = locator
+                    // Each chapter is its own WebView; the script guards against running twice.
+                    navigator.evaluateJavascript(SELECTION_SCROLL_LOCK)
                     if (first) first = false else tracker.onPageTurn()
 
                     val progress = locator.locations.totalProgression ?: 0.0
@@ -298,5 +314,27 @@ class ReaderActivity : AppCompatActivity() {
         private const val NAVIGATOR_TAG = "navigator"
         private const val MENU_COPY = 1
         private const val MENU_SHARE_QUOTE = 2
+
+        /**
+         * Paginated chapters are one wide page of CSS columns. While a selection handle is dragged,
+         * Chrome scrolls that page sideways, so the handle stops following the finger and the
+         * selection jumps (readium/kotlin-toolkit#325). Hold the page still while text is selected.
+         */
+        private val SELECTION_SCROLL_LOCK = """
+            (function() {
+              if (window.__shelfSelectionLock) return;
+              window.__shelfSelectionLock = true;
+              var page = document.scrollingElement;
+              var locked = null;
+              document.addEventListener('selectionchange', function() {
+                var s = window.getSelection();
+                if (s && !s.isCollapsed) { if (locked === null) locked = page.scrollLeft; }
+                else locked = null;
+              });
+              window.addEventListener('scroll', function() {
+                if (locked !== null && page.scrollLeft !== locked) page.scrollLeft = locked;
+              }, true);
+            })();
+        """.trimIndent()
     }
 }
