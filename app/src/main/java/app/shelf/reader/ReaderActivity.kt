@@ -251,22 +251,40 @@ class ReaderActivity : AppCompatActivity() {
         ui.selection = null
     }
 
+    /**
+     * The selection as it is on the page right now. Chrome doesn't always restart its selection
+     * mode when a handle is let go, so the copy taken when the panel opened can be out of date.
+     */
+    private suspend fun liveSelection(): SelectionInfo? {
+        val selection = navigator.currentSelection()
+        val text = selection?.locator?.text?.highlight
+        if (selection == null || text.isNullOrBlank()) return ui.selection
+        val atTop = selection.rect?.let { isLowerHalf(it.centerY()) } ?: ui.selection?.atTop ?: false
+        return SelectionInfo(text, selection.locator, atTop)
+    }
+
     private fun highlightSelection(color: HighlightColor?, editNote: Boolean) {
-        val selection = ui.selection ?: return
-        clearSelection()
-        hideControls()
-        addHighlight(selection.locator, color, editNote, atTop = selection.atTop)
+        lifecycleScope.launch {
+            val selection = liveSelection() ?: return@launch
+            clearSelection()
+            hideControls()
+            addHighlight(selection.locator, color, editNote, atTop = selection.atTop)
+        }
     }
 
     private fun copySelection() {
-        ui.selection?.let { copy(it.text) }
-        hideControls()
+        lifecycleScope.launch {
+            liveSelection()?.let { copy(it.text) }
+            hideControls()
+        }
     }
 
     private fun shareSelection() {
-        // A quote that's too long keeps its selection so it can be shortened.
-        val selection = ui.selection ?: return
-        if (shareQuote(selection.text)) hideControls()
+        lifecycleScope.launch {
+            // A quote that's too long keeps its selection so it can be shortened.
+            val selection = liveSelection() ?: return@launch
+            if (shareQuote(selection.text)) hideControls()
+        }
     }
 
     private fun copy(text: String) {
