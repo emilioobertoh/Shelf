@@ -77,6 +77,16 @@ fun ReaderControls(
     onSeek: (Int) -> Unit,
     onOpenLink: (Link) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit,
+    onOpenHighlight: (Highlight) -> Unit,
+    onHighlightColor: (Highlight, HighlightColor) -> Unit,
+    onHighlightNote: (Highlight, String) -> Unit,
+    onDeleteHighlight: (Highlight) -> Unit,
+    onCopyHighlight: (Highlight) -> Unit,
+    onShareHighlight: (Highlight) -> Unit,
+    onSelectionColor: (HighlightColor) -> Unit,
+    onSelectionNote: () -> Unit,
+    onCopySelection: () -> Unit,
+    onShareSelection: () -> Unit,
 ) {
     val theme = PageThemes.byId(state.settings.themeId)
     val visible = state.controlsVisible
@@ -87,7 +97,10 @@ fun ReaderControls(
             Modifier
                 .fillMaxSize()
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                    if (state.panel != ReaderPanel.None) state.panel = ReaderPanel.None else onHide()
+                    when (state.panel) {
+                        ReaderPanel.None, ReaderPanel.Highlight, ReaderPanel.Selection -> onHide()
+                        else -> state.panel = ReaderPanel.None
+                    }
                 }
         )
 
@@ -135,10 +148,60 @@ fun ReaderControls(
                 title = title,
                 toc = tableOfContents,
                 current = state.locator,
+                highlights = state.highlights,
                 theme = theme,
                 onClose = { state.panel = ReaderPanel.None },
                 onOpenLink = onOpenLink,
+                onOpenHighlight = onOpenHighlight,
             )
+        }
+
+        // Remember the side while the panel slides away, after the selection is gone.
+        val selectionAtTop = remember { mutableStateOf(false) }
+        state.selection?.let { selectionAtTop.value = it.atTop }
+        val atTop = selectionAtTop.value
+        AnimatedVisibility(
+            visible = state.panel == ReaderPanel.Selection,
+            enter = slideInVertically { if (atTop) -it else it },
+            exit = slideOutVertically { if (atTop) -it else it },
+            modifier = Modifier.align(if (atTop) Alignment.TopCenter else Alignment.BottomCenter),
+        ) {
+            SelectionSheet(
+                atTop = atTop,
+                theme = theme,
+                onColor = onSelectionColor,
+                onNote = onSelectionNote,
+                onCopy = onCopySelection,
+                onShare = onShareSelection,
+                onDone = onHide,
+            )
+        }
+
+        val active = state.highlights.firstOrNull { it.id == state.activeHighlightId }
+        val highlightAtTop = state.highlightAtTop
+        AnimatedVisibility(
+            visible = state.panel == ReaderPanel.Highlight && active != null,
+            enter = slideInVertically { if (highlightAtTop) -it else it },
+            exit = slideOutVertically { if (highlightAtTop) -it else it },
+            modifier = Modifier.align(if (highlightAtTop) Alignment.TopCenter else Alignment.BottomCenter),
+        ) {
+            // Keep showing the last highlight while the sheet slides away.
+            val last = remember { mutableStateOf(active) }
+            if (active != null) last.value = active
+            last.value?.let { h ->
+                HighlightSheet(
+                    highlight = h,
+                    atTop = highlightAtTop,
+                    startEditing = state.editNote,
+                    theme = theme,
+                    onColor = { onHighlightColor(h, it) },
+                    onNote = { onHighlightNote(h, it) },
+                    onCopy = { onCopyHighlight(h); onHide() },
+                    onShare = { onShareHighlight(h) },
+                    onDelete = { onDeleteHighlight(h) },
+                    onDone = onHide,
+                )
+            }
         }
     }
 }
@@ -182,7 +245,7 @@ private fun TopBar(
 }
 
 @Composable
-private fun RoundButton(theme: PageTheme, onClick: () -> Unit, content: @Composable () -> Unit) {
+internal fun RoundButton(theme: PageTheme, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         Modifier
             .size(40.dp)
@@ -446,10 +509,13 @@ private fun ContentsPanel(
     title: String,
     toc: List<Link>,
     current: Locator?,
+    highlights: List<Highlight>,
     theme: PageTheme,
     onClose: () -> Unit,
     onOpenLink: (Link) -> Unit,
+    onOpenHighlight: (Highlight) -> Unit,
 ) {
+    var tab by rememberSaveable { mutableStateOf(0) }
     val rows = remember(toc) { flatten(toc) }
     val currentHref = current?.href?.toString()
     val currentIndex = rows.indexOfLast { it.link.baseHref() == currentHref }
@@ -467,14 +533,47 @@ private fun ContentsPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Contents", color = theme.chromeText, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(if (tab == 0) "Contents" else "Highlights", color = theme.chromeText, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(title, color = theme.chromeText.copy(alpha = 0.6f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             RoundButton(theme, onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Close contents", tint = theme.chromeText, modifier = Modifier.size(20.dp))
             }
         }
+        Row(
+            Modifier
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 10.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(theme.chromeText.copy(alpha = 0.07f))
+                .padding(3.dp),
+        ) {
+            listOf("Contents", if (highlights.isEmpty()) "Highlights" else "Highlights (${highlights.size})")
+                .forEachIndexed { i, label ->
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (tab == i) theme.chrome else Color.Transparent)
+                            .clickable { tab = i }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            color = theme.chromeText,
+                            fontSize = 14.sp,
+                            fontWeight = if (tab == i) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+        }
         HorizontalDivider(color = theme.chromeText.copy(alpha = 0.1f))
+        if (tab == 1) {
+            HighlightsList(highlights, theme, onOpenHighlight)
+            return@Column
+        }
         if (rows.isEmpty()) {
             Text("This book has no table of contents.", color = theme.chromeText.copy(alpha = 0.6f), modifier = Modifier.padding(20.dp))
         }

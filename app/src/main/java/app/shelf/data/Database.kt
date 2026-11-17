@@ -1,6 +1,7 @@
 package app.shelf.data
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
@@ -51,6 +52,25 @@ data class ReadingSessionEntity(
     val endedAt: Long,
     val activeSeconds: Long,
     val pagesTurned: Int,
+)
+
+/** A highlighted passage, with an optional note. */
+@Entity(tableName = "highlights", indices = [Index("bookId")])
+data class HighlightEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val bookId: Long,
+    /** Readium Locator as JSON, including the highlighted text. */
+    val locatorJson: String,
+    val text: String,
+    /** A [app.shelf.reader.HighlightColor] id, e.g. "yellow". */
+    val color: String,
+    val note: String? = null,
+    /** Chapter title at the time of highlighting, for the list. */
+    val chapter: String? = null,
+    /** Reading-order index plus progression in the chapter, so the list follows the book. */
+    val sortKey: Double,
+    val createdAt: Long,
+    val updatedAt: Long,
 )
 
 data class DayTotal(
@@ -118,14 +138,38 @@ interface SessionDao {
     suspend fun secondsOn(day: Long): Long
 }
 
+@Dao
+interface HighlightDao {
+    @Query("SELECT * FROM highlights WHERE bookId = :bookId ORDER BY sortKey, createdAt")
+    fun observeForBook(bookId: Long): Flow<List<HighlightEntity>>
+
+    @Insert
+    suspend fun insert(highlight: HighlightEntity): Long
+
+    @Query("UPDATE highlights SET color = :color, updatedAt = :time WHERE id = :id")
+    suspend fun setColor(id: Long, color: String, time: Long)
+
+    @Query("UPDATE highlights SET note = :note, updatedAt = :time WHERE id = :id")
+    suspend fun setNote(id: Long, note: String?, time: Long)
+
+    @Query("DELETE FROM highlights WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    /** The colour last picked, used for the next highlight. */
+    @Query("SELECT color FROM highlights ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun lastColor(): String?
+}
+
 @Database(
-    entities = [BookEntity::class, ReadingSessionEntity::class],
-    version = 1,
+    entities = [BookEntity::class, ReadingSessionEntity::class, HighlightEntity::class],
+    version = 2,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 abstract class ShelfDatabase : RoomDatabase() {
     abstract fun books(): BookDao
     abstract fun sessions(): SessionDao
+    abstract fun highlights(): HighlightDao
 
     companion object {
         fun create(context: Context): ShelfDatabase =

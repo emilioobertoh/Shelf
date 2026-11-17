@@ -9,6 +9,7 @@ A local-only EPUB reader for Android, modelled on Apple Books. Point it at a fol
   - Themes: Original, Sepia, Quiet and Night.
   - Fonts: the book's own, Charter, Literata, Source Serif or Sans Serif.
   - Text size, line spacing, margins and justification.
+- **Highlights and notes:** select text to highlight it in one of five colours or add a note. Tap a highlight to change or delete it, and find them all, in book order, under Contents → Highlights.
 - **Reading goals:** a daily minutes goal with a progress ring, the last 7 days, streaks, and a yearly books goal. Reading time is only counted while you're actually turning pages.
 - **Morning reminder:** a daily notification with your goal and current book; tap it to open the book where you left off.
 - **Share a quote:** select up to 400 characters and turn them into an Instagram Story image, coloured from the book's cover.

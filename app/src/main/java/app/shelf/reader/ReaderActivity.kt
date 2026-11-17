@@ -29,12 +29,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import app.shelf.OpenBook
 import app.shelf.R
+import app.shelf.data.HighlightEntity
 import app.shelf.data.ReaderSettings
 import app.shelf.shelf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.input.InputListener
@@ -44,7 +46,10 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 
-enum class ReaderPanel { None, Appearance, Contents }
+enum class ReaderPanel { None, Appearance, Contents, Highlight, Selection }
+
+/** Text the reader has selected, shown in the Selection panel. */
+class SelectionInfo(val text: String, val locator: Locator, val atTop: Boolean)
 
 /** Compose-observable state for the reader overlay. */
 class ReaderUiState(settings: ReaderSettings) {
@@ -52,6 +57,15 @@ class ReaderUiState(settings: ReaderSettings) {
     var panel by mutableStateOf(ReaderPanel.None)
     var locator by mutableStateOf<Locator?>(null)
     var settings by mutableStateOf(settings)
+    var highlights by mutableStateOf<List<Highlight>>(emptyList())
+    /** The highlight shown in the Highlight panel. */
+    var activeHighlightId by mutableStateOf<Long?>(null)
+    /** Open the note field with the keyboard up. */
+    var editNote by mutableStateOf(false)
+    /** Show the Highlight panel at the top, when the highlight is in the lower half of the page. */
+    var highlightAtTop by mutableStateOf(false)
+    /** The current text selection, while the Selection panel is up. */
+    var selection by mutableStateOf<SelectionInfo?>(null)
 }
 
 @OptIn(ExperimentalReadiumApi::class)
@@ -64,8 +78,9 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var root: FrameLayout
     private lateinit var overlay: ComposeView
     private var hideJob: Job? = null
-    /** The Copy / Share Quote menu while text is selected. */
+    /** Chrome's selection mode, while text is selected and no handle is being dragged. */
     private var selectionMode: ActionMode? = null
+    private var selectionJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val openBook = shelf.openBook
@@ -108,6 +123,16 @@ class ReaderActivity : AppCompatActivity() {
                     onSeek = { index -> goToPosition(index) },
                     onOpenLink = { link -> goToLink(link) },
                     onSettingsChange = { updateSettings(it) },
+                    onOpenHighlight = { goToHighlight(it) },
+                    onHighlightColor = { h, color -> setHighlightColor(h, color) },
+                    onHighlightNote = { h, note -> setHighlightNote(h, note) },
+                    onDeleteHighlight = { deleteHighlight(it) },
+                    onCopyHighlight = { copy(it.entity.text) },
+                    onShareHighlight = { shareQuote(it.entity.text) },
+                    onSelectionColor = { highlightSelection(it, editNote = false) },
+                    onSelectionNote = { highlightSelection(null, editNote = true) },
+                    onCopySelection = { copySelection() },
+                    onShareSelection = { shareSelection() },
                 )
             }
         }
@@ -140,19 +165,28 @@ class ReaderActivity : AppCompatActivity() {
             }
         })
 
+        // Tapping a highlight opens its panel: colour, note, copy, share, delete.
+        navigator.addDecorationListener(HIGHLIGHT_GROUP, object : DecorableNavigator.Listener {
+            override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+                val id = event.decoration.id.toLongOrNull() ?: return false
+                // Readium calls this on the WebView's JavaScript thread.
+                val atTop = event.rect?.let { isLowerHalf(it.centerY()) } ?: false
+                runOnUiThread { showHighlight(id, editNote = false, atTop = atTop) }
+                return true
+            }
+        })
+
         tracker = ReadingTracker(book.bookId, shelf.db.sessions(), lifecycleScope)
         observeLocation()
+        observeHighlights()
         applyPageTheme()
         setSystemBarsVisible(false)
 
         onBackPressedDispatcher.addCallback(this) {
-            val selection = selectionMode
             when {
                 // Back clears a selection first, as in other apps.
-                selection != null -> {
-                    navigator.clearSelection()
-                    selection.finish()
-                }
+                ui.panel == ReaderPanel.Selection || selectionMode != null -> hideControls()
+                ui.panel == ReaderPanel.Highlight -> hideControls()
                 ui.panel != ReaderPanel.None -> ui.panel = ReaderPanel.None
                 else -> finish()
             }
@@ -160,59 +194,166 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * Menu over selected text. Readium replaces the system menu with this one,
-     * so Copy is added back by hand next to Share Quote.
+     * Chrome starts a selection mode after a long press and again each time a handle is let go
+     * (it ends it while a handle is dragged). Instead of its floating menu, which doesn't come
+     * back after a drag in Readium, each settled selection opens Shelf's Selection panel.
+     * The menu is left empty so Chrome draws no toolbar.
      */
     private val selectionCallback = object : ActionMode.Callback {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
             selectionMode = mode
-            menu.add(Menu.NONE, MENU_COPY, 0, android.R.string.copy)
-            menu.add(Menu.NONE, MENU_SHARE_QUOTE, 1, R.string.share_quote)
+            refreshSelection()
             return true
         }
 
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu) = false
 
-        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-            when (item.itemId) {
-                MENU_COPY -> withSelection { text ->
-                    getSystemService(ClipboardManager::class.java)
-                        .setPrimaryClip(ClipData.newPlainText(book.title, text))
-                    navigator.clearSelection()
-                    mode.finish()
-                }
-                MENU_SHARE_QUOTE -> withSelection { text -> shareQuote(text, mode) }
-                else -> return false
-            }
-            return true
-        }
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem) = false
 
         override fun onDestroyActionMode(mode: ActionMode) {
             if (selectionMode === mode) selectionMode = null
+            refreshSelection()
         }
     }
 
-    private fun withSelection(block: (String) -> Unit) {
-        lifecycleScope.launch {
-            val text = navigator.currentSelection()?.locator?.text?.highlight
-            if (!text.isNullOrBlank()) block(text)
+    /** Shows, updates or closes the Selection panel once the selection has settled. */
+    private fun refreshSelection() {
+        selectionJob?.cancel()
+        selectionJob = lifecycleScope.launch {
+            delay(200)
+            val selection = navigator.currentSelection()
+            val text = selection?.locator?.text?.highlight
+            if (selection == null || text.isNullOrBlank()) {
+                // The selection was cleared, e.g. by tapping the page.
+                if (ui.panel == ReaderPanel.Selection) hideControls()
+                return@launch
+            }
+            // A handle is being dragged: keep the panel as it is until it's let go.
+            if (selectionMode == null) return@launch
+
+            val atTop = selection.rect?.let { isLowerHalf(it.centerY()) } ?: false
+            ui.selection = SelectionInfo(text, selection.locator, atTop)
+            hideJob?.cancel()
+            ui.controlsVisible = false
+            ui.panel = ReaderPanel.Selection
+            setSystemBarsVisible(false)
+            overlay.visibility = View.VISIBLE
         }
     }
 
-    private fun shareQuote(raw: String, mode: ActionMode) {
+    private fun isLowerHalf(y: Float) = y > (navigator.view?.height ?: 0) / 2f
+
+    private fun clearSelection() {
+        selectionJob?.cancel()
+        navigator.clearSelection()
+        selectionMode?.finish()
+        selectionMode = null
+        ui.selection = null
+    }
+
+    private fun highlightSelection(color: HighlightColor?, editNote: Boolean) {
+        val selection = ui.selection ?: return
+        clearSelection()
+        hideControls()
+        addHighlight(selection.locator, color, editNote, atTop = selection.atTop)
+    }
+
+    private fun copySelection() {
+        ui.selection?.let { copy(it.text) }
+        hideControls()
+    }
+
+    private fun shareSelection() {
+        // A quote that's too long keeps its selection so it can be shortened.
+        val selection = ui.selection ?: return
+        if (shareQuote(selection.text)) hideControls()
+    }
+
+    private fun copy(text: String) {
+        getSystemService(ClipboardManager::class.java)
+            .setPrimaryClip(ClipData.newPlainText(book.title, text))
+    }
+
+    /** Opens the Story preview, or explains the limit and returns false if the quote is too long. */
+    private fun shareQuote(raw: String): Boolean {
         val quote = QuoteText.clean(raw)
         if (quote.length > QuoteText.MAX_CHARS) {
-            // Keep the selection so it can be shortened instead of starting over.
             Toast.makeText(
                 this,
                 getString(R.string.quote_too_long, quote.length, QuoteText.MAX_CHARS),
                 Toast.LENGTH_LONG,
             ).show()
-            return
+            return false
         }
-        navigator.clearSelection()
-        mode.finish()
         startActivity(QuoteShareActivity.intent(this, book.bookId, quote))
+        return true
+    }
+
+    private fun observeHighlights() {
+        lifecycleScope.launch {
+            shelf.db.highlights().observeForBook(book.bookId).collect { rows ->
+                val highlights = rows.mapNotNull { it.toHighlight() }
+                ui.highlights = highlights
+                navigator.applyDecorations(highlights.map { it.toDecoration() }, HIGHLIGHT_GROUP)
+                // Close the panel if its highlight was deleted.
+                if (ui.panel == ReaderPanel.Highlight && highlights.none { it.id == ui.activeHighlightId }) {
+                    hideControls()
+                }
+            }
+        }
+    }
+
+    private fun addHighlight(locator: Locator, color: HighlightColor?, editNote: Boolean, atTop: Boolean) {
+        val text = locator.text.highlight?.trim().orEmpty()
+        val publication = book.publication
+        lifecycleScope.launch {
+            val dao = shelf.db.highlights()
+            val now = System.currentTimeMillis()
+            val id = dao.insert(
+                HighlightEntity(
+                    bookId = book.bookId,
+                    locatorJson = locator.toJSON().toString(),
+                    text = text,
+                    color = color?.id ?: dao.lastColor() ?: HighlightColor.Yellow.id,
+                    chapter = publication.chapterTitle(locator),
+                    sortKey = publication.sortKey(locator),
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+            if (editNote) showHighlight(id, editNote = true, atTop = atTop)
+        }
+    }
+
+    private fun showHighlight(id: Long, editNote: Boolean, atTop: Boolean) {
+        hideJob?.cancel()
+        ui.controlsVisible = false
+        ui.activeHighlightId = id
+        ui.editNote = editNote
+        ui.highlightAtTop = atTop
+        ui.panel = ReaderPanel.Highlight
+        overlay.visibility = View.VISIBLE
+    }
+
+    private fun goToHighlight(highlight: Highlight) {
+        navigator.go(highlight.locator, animated = false)
+        hideControls()
+    }
+
+    private fun setHighlightColor(highlight: Highlight, color: HighlightColor) {
+        shelf.appScope.launch {
+            shelf.db.highlights().setColor(highlight.id, color.id, System.currentTimeMillis())
+        }
+    }
+
+    private fun setHighlightNote(highlight: Highlight, note: String) {
+        shelf.appScope.launch {
+            shelf.db.highlights().setNote(highlight.id, note.trim().ifEmpty { null }, System.currentTimeMillis())
+        }
+    }
+
+    private fun deleteHighlight(highlight: Highlight) {
+        shelf.appScope.launch { shelf.db.highlights().delete(highlight.id) }
     }
 
     private fun observeLocation() {
@@ -266,7 +407,9 @@ class ReaderActivity : AppCompatActivity() {
         setSystemBarsVisible(true)
     }
 
+    /** Hides the controls and any panel. Closing the Selection panel also clears the selection. */
     private fun hideControls() {
+        if (ui.panel == ReaderPanel.Selection || selectionMode != null) clearSelection()
         ui.controlsVisible = false
         ui.panel = ReaderPanel.None
         setSystemBarsVisible(false)
@@ -312,8 +455,6 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val NAVIGATOR_TAG = "navigator"
-        private const val MENU_COPY = 1
-        private const val MENU_SHARE_QUOTE = 2
 
         /**
          * Paginated chapters are one wide page of CSS columns. While a selection handle is dragged,
