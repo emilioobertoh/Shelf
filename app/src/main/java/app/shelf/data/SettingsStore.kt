@@ -36,6 +36,22 @@ data class Reminder(
 
 enum class LibraryLayout { GRID, LIST }
 
+/** Order of All Books. Recently Read keeps what you're reading at the top, like Apple Books. */
+enum class LibrarySort(val label: String) {
+    RECENT("Recently Read"),
+    TITLE("Title"),
+    AUTHOR("Author"),
+    NEWEST("Newest Added"),
+    OLDEST("Oldest Added"),
+}
+
+/** Order of the Want to Read list. */
+enum class ListSort(val label: String) {
+    NEWEST("Newest Added"),
+    OLDEST("Oldest Added"),
+    TITLE("Title"),
+}
+
 class SettingsStore(private val context: Context) {
     private object Keys {
         val theme = stringPreferencesKey("reader_theme")
@@ -48,6 +64,8 @@ class SettingsStore(private val context: Context) {
         val yearlyBooks = intPreferencesKey("goal_yearly_books")
         val libraryTree = stringPreferencesKey("library_tree_uri")
         val layout = stringPreferencesKey("library_layout")
+        val librarySort = stringPreferencesKey("library_sort")
+        val listSort = stringPreferencesKey("reading_list_sort")
         val reminderOn = booleanPreferencesKey("reminder_enabled")
         val reminderHour = intPreferencesKey("reminder_hour")
         val reminderMinute = intPreferencesKey("reminder_minute")
@@ -79,6 +97,18 @@ class SettingsStore(private val context: Context) {
     val layout: Flow<LibraryLayout> = context.dataStore.data.map { p ->
         if (p[Keys.layout] == LibraryLayout.LIST.name) LibraryLayout.LIST else LibraryLayout.GRID
     }
+
+    val librarySort: Flow<LibrarySort> = context.dataStore.data.map { p ->
+        LibrarySort.entries.firstOrNull { it.name == p[Keys.librarySort] } ?: LibrarySort.RECENT
+    }
+
+    val listSort: Flow<ListSort> = context.dataStore.data.map { p ->
+        ListSort.entries.firstOrNull { it.name == p[Keys.listSort] } ?: ListSort.NEWEST
+    }
+
+    suspend fun setLibrarySort(sort: LibrarySort) = context.dataStore.edit { it[Keys.librarySort] = sort.name }
+
+    suspend fun setListSort(sort: ListSort) = context.dataStore.edit { it[Keys.listSort] = sort.name }
 
     val reminder: Flow<Reminder> = context.dataStore.data.map { p ->
         val d = Reminder()

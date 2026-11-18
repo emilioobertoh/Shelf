@@ -4,13 +4,13 @@ A local-first EPUB reader for Android, modelled on Apple Books. Point it at a fo
 
 ## Features
 
-- **Library:** scans a folder you choose (and its subfolders) for EPUBs. Shows covers, a Continue Reading card, progress per book, and a grid or list view.
+- **Library:** scans a folder you choose (and its subfolders) for EPUBs. Shows covers, a Continue Reading card, progress per book, and a grid or list view sorted by recently read, title, author or date added.
 - **Reader:** paginated reading with tap and swipe page turns, a table of contents, and a scrubber to jump anywhere.
   - Themes: Original, Sepia, Quiet and Night.
   - Fonts: the book's own, Charter, Literata, Source Serif or Sans Serif.
   - Text size, line spacing, margins and justification.
 - **Highlights and notes:** select text to highlight it in one of five colours or add a note. Tap a highlight to change or delete it, and find them all, in book order, under Contents → Highlights.
-- **Want to Read:** search for books by title, author or ISBN and keep a list of what to read next, with covers and descriptions saved for offline use. Books you already have show as In Library.
+- **Want to Read:** search for books by title, author or ISBN and keep a list of what to read next, with covers and descriptions saved for offline use. English editions come first, then Spanish ones. Books you already have show as In Library.
 - **Reading goals:** a daily minutes goal with a progress ring, the last 7 days, streaks, and a yearly books goal. Reading time is only counted while you're actually turning pages.
 - **Morning reminder:** a daily notification with your goal and current book; tap it to open the book where you left off.
 - **Share a quote:** select up to 400 characters and turn them into an Instagram Story image, coloured from the book's cover.

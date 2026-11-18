@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
@@ -80,6 +81,7 @@ import androidx.compose.ui.unit.sp
 import app.shelf.data.BookEntity
 import app.shelf.data.Goals
 import app.shelf.data.LibraryLayout
+import app.shelf.data.LibrarySort
 import app.shelf.data.Reminder
 import app.shelf.reminder.ReadingReminder
 import android.Manifest
@@ -100,11 +102,14 @@ import kotlinx.coroutines.withContext
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     readingList: ReadingListViewModel,
+    gridState: LazyGridState,
     onOpenReadingList: () -> Unit,
     onOpenReader: () -> Unit,
 ) {
     val books by viewModel.books.collectAsState()
     val wantToRead by readingList.entries.collectAsState()
+    val continueBook by viewModel.continueReading.collectAsState()
+    val sort by viewModel.sort.collectAsState()
     val folder by viewModel.libraryFolder.collectAsState()
     val stats by viewModel.stats.collectAsState()
     val goals by viewModel.goals.collectAsState()
@@ -136,9 +141,10 @@ fun LibraryScreen(
             if (folder == null) {
                 EmptyLibrary(onChooseFolder = { pickFolder.launch(null) })
             } else {
-                val continueBook = books.firstOrNull { it.lastOpenedAt != null && it.finishedAt == null }
+                val continueBook = continueBook
                 val list = layout == LibraryLayout.LIST
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = if (list) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 108.dp),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 32.dp),
                     horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -168,17 +174,23 @@ fun LibraryScreen(
                         WantToReadRow(wantToRead, onSeeAll = onOpenReadingList, onOpenBook = open)
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            if (books.isEmpty()) "No EPUBs found in this folder yet" else "All Books",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (books.isEmpty()) "No EPUBs found in this folder yet" else "All Books",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (books.size > 1) {
+                                SortMenu(sort, LibrarySort.entries, { it.label }, viewModel::setSort)
+                            }
+                        }
                     }
                     items(books, key = { it.id }) { book ->
                         BookTile(
                             book = book,
                             list = list,
+                            modifier = Modifier.animateItem(),
                             onOpen = { open(book) },
                             onSetFinished = { viewModel.setFinished(book, it) },
                         )
@@ -390,7 +402,13 @@ private fun ContinueReading(book: BookEntity, onOpen: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BookTile(book: BookEntity, list: Boolean, onOpen: () -> Unit, onSetFinished: (Boolean) -> Unit) {
+private fun BookTile(
+    book: BookEntity,
+    list: Boolean,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit,
+    onSetFinished: (Boolean) -> Unit,
+) {
     var menu by remember { mutableStateOf(false) }
     val isNew = book.lastOpenedAt == null && book.finishedAt == null
     val status = when {
@@ -399,7 +417,7 @@ private fun BookTile(book: BookEntity, list: Boolean, onOpen: () -> Unit, onSetF
         else -> "${(book.progress * 100).roundToInt()}%"
     }
     val clickable = Modifier.combinedClickable(onClick = onOpen, onLongClick = { menu = true })
-    Box {
+    Box(modifier) {
         if (list) {
             Column(clickable) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

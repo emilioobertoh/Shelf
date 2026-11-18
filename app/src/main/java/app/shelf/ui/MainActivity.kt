@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,19 +36,28 @@ class MainActivity : ComponentActivity() {
         setContent {
             ShelfTheme {
                 var showList by rememberSaveable { mutableStateOf(false) }
-                if (showList) {
-                    ReadingListScreen(
-                        viewModel = readingList,
-                        onBack = { showList = false },
-                        onOpenBook = { viewModel.open(it, ::startReader) },
-                    )
-                } else {
-                    LibraryScreen(
-                        viewModel = viewModel,
-                        readingList = readingList,
-                        onOpenReadingList = { showList = true },
-                        onOpenReader = ::startReader,
-                    )
+                // Kept out here so the library keeps its scroll position while Want to Read is open.
+                val libraryGrid = rememberLazyGridState()
+                AnimatedContent(
+                    targetState = showList,
+                    transitionSpec = { pushTransition(forward = targetState) },
+                    label = "screen",
+                ) { listOpen ->
+                    if (listOpen) {
+                        ReadingListScreen(
+                            viewModel = readingList,
+                            onBack = { showList = false },
+                            onOpenBook = { viewModel.open(it, ::startReader) },
+                        )
+                    } else {
+                        LibraryScreen(
+                            viewModel = viewModel,
+                            readingList = readingList,
+                            gridState = libraryGrid,
+                            onOpenReadingList = { showList = true },
+                            onOpenReader = ::startReader,
+                        )
+                    }
                 }
             }
         }

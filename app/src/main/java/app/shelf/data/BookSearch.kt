@@ -9,6 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,19 +45,28 @@ class BookSearch(context: Context) {
     private val coversDir = File(context.filesDir, "list-covers").apply { mkdirs() }
     private val googleKey = BuildConfig.GOOGLE_BOOKS_KEY.takeIf { it.isNotBlank() }
 
+    /**
+     * English editions first, then Spanish ones. Other languages only when neither finds anything.
+     * A book with both an English and a Spanish edition is listed once for each.
+     */
     suspend fun search(query: String): List<BookResult> = withContext(Dispatchers.IO) {
         val text = query.trim()
         if (text.isEmpty()) return@withContext emptyList()
         val isbn = isbnOf(text)
-        val open = runCatching { openLibrary(text, isbn) }
-            .onFailure { Log.w(TAG, "Open Library search failed", it) }
+        val open = runCatching {
+            if (isbn != null) openLibraryIsbn(isbn) else openLibraryByLanguage(text)
+        }.onFailure { Log.w(TAG, "Open Library search failed", it) }
         val results = open.getOrDefault(emptyList())
         if (results.isNotEmpty() || googleKey == null) {
             // Surface a network failure only when nothing else can answer.
             if (results.isEmpty()) open.exceptionOrNull()?.let { throw it }
             return@withContext results
         }
-        google(if (isbn != null) "isbn:$isbn" else text).map { it.first }
+        if (isbn != null) return@withContext google("isbn:$isbn").map { it.first }
+        val english = async { google(text, lang = "en") }
+        val spanish = async { google(text, lang = "es") }
+        val preferred = (english.await() + spanish.await()).map { it.first }.distinctBy { it.key }
+        preferred.ifEmpty { google(text).map { it.first } }
     }
 
     /** Description and a better cover, if either source has them. */
@@ -64,7 +75,8 @@ class BookSearch(context: Context) {
         var cover = result.coverUrl
         if (result.key.startsWith("ol:")) {
             description = runCatching {
-                val work = getJson("https://openlibrary.org${result.key.removePrefix("ol:")}.json")
+                val workKey = result.key.removePrefix("ol:").substringBefore("#")
+                val work = getJson("https://openlibrary.org$workKey.json")
                 when (val d = work.opt("description")) {
                     is JSONObject -> d.optString("value")
                     is String -> d
@@ -103,26 +115,67 @@ class BookSearch(context: Context) {
         }.onFailure { Log.w(TAG, "Cover download failed", it) }.getOrNull()
     }
 
-    private fun openLibrary(text: String, isbn: String?): List<BookResult> {
-        val fields = "key,title,author_name,first_publish_year,cover_i,number_of_pages_median"
-        val query = if (isbn != null) "isbn=$isbn" else "q=${enc(text)}"
-        val json = getJson("https://openlibrary.org/search.json?$query&fields=$fields&limit=25")
+    /** Fails only if every request failed, so one slow language doesn't hide the other. */
+    private suspend fun openLibraryByLanguage(text: String): List<BookResult> = coroutineScope {
+        val english = async { runCatching { openLibrary(text, "eng") } }
+        val spanish = async { runCatching { openLibrary(text, "spa") } }
+        val tries = listOf(english.await(), spanish.await())
+        tries.mapNotNull { it.exceptionOrNull() }.forEach { Log.w(TAG, "Open Library language search failed", it) }
+        val preferred = tries.flatMap { it.getOrDefault(emptyList()) }
+        when {
+            preferred.isNotEmpty() -> preferred
+            tries.all { it.isFailure } -> throw tries.first().exceptionOrNull()!!
+            else -> openLibrary(text, language = null)
+        }
+    }
+
+    /**
+     * One Open Library search. With a [language], only works with an edition in it are returned,
+     * shown with that edition's title and cover.
+     */
+    private fun openLibrary(text: String, language: String?): List<BookResult> {
+        val q = if (language != null) "$text language:$language" else text
+        val json = getJson("https://openlibrary.org/search.json?q=${enc(q)}&fields=$SEARCH_FIELDS&limit=20")
         val docs = json.optJSONArray("docs") ?: return emptyList()
-        // For an ISBN, show that edition's own title and cover rather than the work's.
-        val edition = isbn?.let { runCatching { getJson("https://openlibrary.org/isbn/$it.json") }.getOrNull() }
+        return (0 until docs.length()).mapNotNull { i ->
+            val doc = docs.getJSONObject(i)
+            val edition = doc.optJSONObject("editions")?.optJSONArray("docs")?.optJSONObject(0)
+            val title = edition?.optString("title")?.takeIf { it.isNotBlank() }
+                ?: doc.optString("title").takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            val coverId = edition?.optLong("cover_i", 0)?.takeIf { it > 0 }
+                ?: doc.optLong("cover_i", 0).takeIf { it > 0 }
+            val editionKey = edition?.optString("key")?.takeIf { language != null && it.isNotBlank() }
+            BookResult(
+                key = "ol:${doc.optString("key")}" + (editionKey?.let { "#$it" } ?: ""),
+                title = title,
+                authors = latinAuthors(doc),
+                year = doc.optInt("first_publish_year", 0).takeIf { it > 0 },
+                pages = doc.optInt("number_of_pages_median", 0).takeIf { it > 0 },
+                isbn = null, // a work lists every edition's ISBN, so none is reliable here
+                thumbnailUrl = coverId?.let { "https://covers.openlibrary.org/b/id/$it-M.jpg" },
+                coverUrl = coverId?.let { "https://covers.openlibrary.org/b/id/$it-L.jpg" },
+            )
+        }
+    }
+
+    /** An ISBN search, shown with that exact edition's title and cover. */
+    private fun openLibraryIsbn(isbn: String): List<BookResult> {
+        val json = getJson("https://openlibrary.org/search.json?isbn=$isbn&fields=$SEARCH_FIELDS&limit=5")
+        val docs = json.optJSONArray("docs") ?: return emptyList()
+        val edition = runCatching { getJson("https://openlibrary.org/isbn/$isbn.json") }.getOrNull()
         val editionTitle = edition?.optString("title")?.takeIf { it.isNotBlank() }
         val editionCover = edition?.optJSONArray("covers")?.optLong(0, 0)?.takeIf { it > 0 }
         return (0 until docs.length()).mapNotNull { i ->
             val doc = docs.getJSONObject(i)
-            val title = doc.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val title = editionTitle ?: doc.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val coverId = editionCover ?: doc.optLong("cover_i", 0).takeIf { it > 0 }
             BookResult(
                 key = "ol:${doc.optString("key")}",
-                title = editionTitle ?: title,
-                authors = doc.optJSONArray("author_name").strings(),
+                title = title,
+                authors = latinAuthors(doc),
                 year = doc.optInt("first_publish_year", 0).takeIf { it > 0 },
                 pages = doc.optInt("number_of_pages_median", 0).takeIf { it > 0 },
-                // A work lists every edition's ISBN; only keep one when you searched for it.
                 isbn = isbn,
                 thumbnailUrl = coverId?.let { "https://covers.openlibrary.org/b/id/$it-M.jpg" },
                 coverUrl = coverId?.let { "https://covers.openlibrary.org/b/id/$it-L.jpg" },
@@ -131,10 +184,11 @@ class BookSearch(context: Context) {
     }
 
     /** Google Books results, each with its description. */
-    private fun google(q: String, limit: Int = 25): List<Pair<BookResult, String?>> {
+    private fun google(q: String, limit: Int = 20, lang: String? = null): List<Pair<BookResult, String?>> {
         val key = googleKey ?: return emptyList()
+        val langParam = lang?.let { "&langRestrict=$it" } ?: ""
         val json = getJson(
-            "https://www.googleapis.com/books/v1/volumes?q=${enc(q)}&maxResults=$limit&printType=books&key=$key"
+            "https://www.googleapis.com/books/v1/volumes?q=${enc(q)}&maxResults=$limit&printType=books$langParam&key=$key"
         )
         val items = json.optJSONArray("items") ?: return emptyList()
         return (0 until items.length()).mapNotNull { i ->
@@ -176,12 +230,43 @@ class BookSearch(context: Context) {
 
     private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 10_000
-        readTimeout = 15_000
+        readTimeout = 25_000 // Open Library's search can take 10 s or more
         setRequestProperty("User-Agent", USER_AGENT)
         instanceFollowRedirects = true
     }
 
     companion object {
+        private const val SEARCH_FIELDS =
+            "key,title,author_name,author_alternative_name,first_publish_year,cover_i,number_of_pages_median," +
+                "editions,editions.key,editions.title,editions.cover_i"
+
+        /**
+         * Author names in Latin script. Open Library sometimes gives only the original spelling
+         * (e.g. Cyrillic); then the cleanest Latin alternative name is used instead.
+         */
+        internal fun latinAuthors(doc: JSONObject): List<String> {
+            val names = doc.optJSONArray("author_name").strings()
+            val latin = names.filter(::isLatin)
+            if (latin.isNotEmpty() || names.isEmpty()) return latin
+            val alternatives = doc.optJSONArray("author_alternative_name").strings()
+                .map { it.trim() }
+                .filter { isLatin(it) && it.all { c -> c.isLetter() || c in " .'-" } && it.split(" ").size >= 2 }
+            // The first name and surname most alternatives agree on, written plainly.
+            fun first(n: String) = n.substringBefore(" ").lowercase()
+            fun last(n: String) = n.substringAfterLast(" ").lowercase()
+            val firstVotes = alternatives.groupingBy(::first).eachCount()
+            val lastVotes = alternatives.groupingBy(::last).eachCount()
+            val alternative = alternatives.minWithOrNull(
+                compareByDescending<String> { (firstVotes[first(it)] ?: 0) + (lastVotes[last(it)] ?: 0) }
+                    .thenBy { n -> n.split(" ").count { it.length > 1 && it == it.uppercase() } } // "SOLZHENITSYN"
+                    .thenBy { it.count { c -> c == '.' } }
+                    .thenBy { it.length }
+            )
+            return listOf(alternative ?: names.first())
+        }
+
+        private fun isLatin(s: String) = s.all { !it.isLetter() || Character.UnicodeScript.of(it.code) == Character.UnicodeScript.LATIN }
+
         /** The ISBN if the text is one (10 or 13 digits, dashes and spaces allowed). */
         fun isbnOf(text: String): String? {
             val digits = text.replace("-", "").replace(" ", "").uppercase()

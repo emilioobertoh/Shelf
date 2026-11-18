@@ -3,7 +3,9 @@ package app.shelf.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import app.shelf.data.Alphabetical
 import app.shelf.data.BookEntity
+import app.shelf.data.ListSort
 import app.shelf.data.BookResult
 import app.shelf.data.ReadingListEntity
 import app.shelf.shelf
@@ -38,13 +40,25 @@ class ReadingListViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = shelf.db.readingList()
 
     val entries: StateFlow<List<ListEntry>> =
-        combine(dao.observe(), shelf.db.books().observeLibrary()) { list, books ->
+        combine(dao.observe(), shelf.db.books().observeLibrary(), shelf.settings.listSort) { list, books, sort ->
             val byTitle = books.groupBy { normalizeTitle(it.title) }
-            list.map { entry ->
+            val sorted = when (sort) {
+                ListSort.NEWEST -> list // the query is newest first
+                ListSort.OLDEST -> list.sortedBy { it.addedAt }
+                ListSort.TITLE -> list.sortedWith(Alphabetical.byTitle { it.title })
+            }
+            sorted.map { entry ->
                 val match = byTitle[normalizeTitle(entry.title)]?.firstOrNull { sameAuthor(entry.authors, it.author) }
                 ListEntry(entry, match)
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val sort: StateFlow<ListSort> =
+        shelf.settings.listSort.stateIn(viewModelScope, SharingStarted.Eagerly, ListSort.NEWEST)
+
+    fun setSort(sort: ListSort) {
+        viewModelScope.launch { shelf.settings.setListSort(sort) }
+    }
 
     /** Keys already on the list, to show a check instead of + in the results. */
     val savedKeys: StateFlow<Set<String>> =

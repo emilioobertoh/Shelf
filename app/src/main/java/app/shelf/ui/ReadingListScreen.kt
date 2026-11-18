@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.shelf.data.BookEntity
 import app.shelf.data.BookResult
+import app.shelf.data.ListSort
 import app.shelf.data.ReadingListEntity
 import java.net.HttpURLConnection
 import java.net.URL
@@ -98,6 +99,7 @@ fun ReadingListScreen(
     val saved by viewModel.savedKeys.collectAsState()
     val adding by viewModel.adding.collectAsState()
     val message by viewModel.message.collectAsState()
+    val sort by viewModel.sort.collectAsState()
     var selected by remember { mutableStateOf<ListEntry?>(null) }
     val focus = LocalFocusManager.current
 
@@ -160,7 +162,13 @@ fun ReadingListScreen(
             if (search.query.isNotEmpty()) {
                 SearchResults(search, saved, adding, onAdd = viewModel::add)
             } else {
-                SavedList(entries, onSelect = { selected = it }, onOpenBook = onOpenBook)
+                SavedList(
+                    entries,
+                    sort = sort,
+                    onSort = viewModel::setSort,
+                    onSelect = { selected = it },
+                    onOpenBook = onOpenBook,
+                )
             }
         }
     }
@@ -237,41 +245,60 @@ private fun SearchResults(
 }
 
 @Composable
-private fun SavedList(entries: List<ListEntry>, onSelect: (ListEntry) -> Unit, onOpenBook: (BookEntity) -> Unit) {
+private fun SavedList(
+    entries: List<ListEntry>,
+    sort: ListSort,
+    onSort: (ListSort) -> Unit,
+    onSelect: (ListEntry) -> Unit,
+    onOpenBook: (BookEntity) -> Unit,
+) {
     if (entries.isEmpty()) {
         Hint("Search for books you'd like to read by title, author or ISBN, and tap + to add them here.")
         return
     }
     LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+        item(key = "header") {
+            Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (entries.size == 1) "1 book" else "${entries.size} books",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                SortMenu(sort, ListSort.entries, { it.label }, onSort)
+            }
+        }
         items(entries, key = { it.entity.id }) { entry ->
             val e = entry.entity
-            Row(
-                Modifier.fillMaxWidth().clickable { onSelect(entry) }.padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BookCover(e.coverPath, null, e.title, Modifier.width(56.dp))
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(e.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
-                    e.authors?.let {
-                        Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(Modifier.animateItem()) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onSelect(entry) }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BookCover(e.coverPath, null, e.title, Modifier.width(56.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(e.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 20.sp)
+                        e.authors?.let {
+                            Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        facts(e.year, e.pages)?.let {
+                            Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    facts(e.year, e.pages)?.let {
-                        Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    entry.inLibrary?.let { book ->
+                        Spacer(Modifier.width(10.dp))
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Accent)
+                                .clickable { onOpenBook(book) }
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                        ) { Text("Read", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
                     }
                 }
-                entry.inLibrary?.let { book ->
-                    Spacer(Modifier.width(10.dp))
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Accent)
-                            .clickable { onOpenBook(book) }
-                            .padding(horizontal = 14.dp, vertical = 7.dp),
-                    ) { Text("Read", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-                }
+                HorizontalDivider(Modifier.padding(start = 70.dp), color = MaterialTheme.colorScheme.surfaceVariant)
             }
-            HorizontalDivider(Modifier.padding(start = 70.dp), color = MaterialTheme.colorScheme.surfaceVariant)
         }
     }
 }

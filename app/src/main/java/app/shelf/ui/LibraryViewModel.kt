@@ -9,6 +9,8 @@ import app.shelf.OpenBook
 import app.shelf.data.BookEntity
 import app.shelf.data.Goals
 import app.shelf.data.LibraryLayout
+import app.shelf.data.LibrarySort
+import app.shelf.data.sortedFor
 import app.shelf.data.Reminder
 import app.shelf.reminder.ReadingReminder
 import app.shelf.data.ReadingStats
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.readium.r2.shared.publication.services.positions
@@ -31,9 +34,23 @@ import org.readium.r2.shared.publication.services.positions
 class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val shelf = app.shelf
 
+    val sort: StateFlow<LibrarySort> =
+        shelf.settings.librarySort.stateIn(viewModelScope, SharingStarted.Eagerly, LibrarySort.RECENT)
+
+    /** All Books in the chosen order. */
     val books: StateFlow<List<BookEntity>> =
-        shelf.db.books().observeLibrary()
+        combine(shelf.db.books().observeLibrary(), shelf.settings.librarySort) { books, sort -> books.sortedFor(sort) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** The unfinished book opened most recently, whatever the sort order. */
+    val continueReading: StateFlow<BookEntity?> =
+        shelf.db.books().observeLibrary()
+            .map { books -> books.firstOrNull { it.lastOpenedAt != null && it.finishedAt == null } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun setSort(sort: LibrarySort) {
+        viewModelScope.launch { shelf.settings.setLibrarySort(sort) }
+    }
 
     val libraryFolder: StateFlow<String?> =
         shelf.settings.libraryTreeUri.stateIn(viewModelScope, SharingStarted.Eagerly, null)
