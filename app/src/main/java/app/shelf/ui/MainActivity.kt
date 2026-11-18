@@ -10,6 +10,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import app.shelf.reader.ReaderActivity
 import app.shelf.reminder.ReadingReminder
@@ -19,6 +23,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: LibraryViewModel by viewModels()
+    private val readingList: ReadingListViewModel by viewModels()
 
     private val askNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -28,7 +33,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             ShelfTheme {
-                LibraryScreen(viewModel = viewModel, onOpenReader = ::startReader)
+                var showList by rememberSaveable { mutableStateOf(false) }
+                if (showList) {
+                    ReadingListScreen(
+                        viewModel = readingList,
+                        onBack = { showList = false },
+                        onOpenBook = { viewModel.open(it, ::startReader) },
+                    )
+                } else {
+                    LibraryScreen(
+                        viewModel = viewModel,
+                        readingList = readingList,
+                        onOpenReadingList = { showList = true },
+                        onOpenReader = ::startReader,
+                    )
+                }
             }
         }
         if (savedInstanceState == null) handleIntent(intent)

@@ -73,6 +73,24 @@ data class HighlightEntity(
     val updatedAt: Long,
 )
 
+/** A book you want to read, found by searching online. */
+@Entity(tableName = "reading_list", indices = [Index(value = ["key"], unique = true)])
+data class ReadingListEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    /** Source id, e.g. "ol:/works/OL21745884W", so the same book isn't added twice. */
+    val key: String,
+    val title: String,
+    /** Comma-separated. */
+    val authors: String?,
+    val year: Int?,
+    val pages: Int?,
+    val isbn: String?,
+    val description: String?,
+    /** Downloaded cover in app storage. */
+    val coverPath: String?,
+    val addedAt: Long,
+)
+
 data class DayTotal(
     @ColumnInfo(name = "day") val day: Long,
     @ColumnInfo(name = "seconds") val seconds: Long,
@@ -160,16 +178,29 @@ interface HighlightDao {
     suspend fun lastColor(): String?
 }
 
+@Dao
+interface ReadingListDao {
+    @Query("SELECT * FROM reading_list ORDER BY addedAt DESC")
+    fun observe(): Flow<List<ReadingListEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(entry: ReadingListEntity): Long
+
+    @Query("DELETE FROM reading_list WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
 @Database(
-    entities = [BookEntity::class, ReadingSessionEntity::class, HighlightEntity::class],
-    version = 2,
+    entities = [BookEntity::class, ReadingSessionEntity::class, HighlightEntity::class, ReadingListEntity::class],
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class ShelfDatabase : RoomDatabase() {
     abstract fun books(): BookDao
     abstract fun sessions(): SessionDao
     abstract fun highlights(): HighlightDao
+    abstract fun readingList(): ReadingListDao
 
     companion object {
         fun create(context: Context): ShelfDatabase =

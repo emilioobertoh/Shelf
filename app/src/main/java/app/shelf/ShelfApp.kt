@@ -2,6 +2,7 @@ package app.shelf
 
 import android.app.Application
 import android.content.Context
+import app.shelf.data.BookSearch
 import app.shelf.data.LibraryScanner
 import app.shelf.data.ReadiumServices
 import app.shelf.data.ReaderSettings
@@ -35,6 +36,8 @@ class ShelfApp : Application() {
         private set
     lateinit var scanner: LibraryScanner
         private set
+    lateinit var bookSearch: BookSearch
+        private set
 
     /** Work that must finish even when a screen closes (saving the last reading session). */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -47,6 +50,7 @@ class ShelfApp : Application() {
         settings = SettingsStore(this)
         readium = ReadiumServices(this)
         scanner = LibraryScanner(this, db, readium)
+        bookSearch = BookSearch(this)
 
         ReadingReminder.createChannel(this)
         appScope.launch { ReadingReminder.schedule(this@ShelfApp, settings.reminder.first()) }

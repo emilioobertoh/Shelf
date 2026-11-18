@@ -97,8 +97,14 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(viewModel: LibraryViewModel, onOpenReader: () -> Unit) {
+fun LibraryScreen(
+    viewModel: LibraryViewModel,
+    readingList: ReadingListViewModel,
+    onOpenReadingList: () -> Unit,
+    onOpenReader: () -> Unit,
+) {
     val books by viewModel.books.collectAsState()
+    val wantToRead by readingList.entries.collectAsState()
     val folder by viewModel.libraryFolder.collectAsState()
     val stats by viewModel.stats.collectAsState()
     val goals by viewModel.goals.collectAsState()
@@ -147,6 +153,7 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenReader: () -> Unit) {
                             },
                             onRescan = viewModel::rescan,
                             onChangeFolder = { pickFolder.launch(null) },
+                            onOpenReadingList = onOpenReadingList,
                         )
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
@@ -156,6 +163,9 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenReader: () -> Unit) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             ContinueReading(continueBook) { open(continueBook) }
                         }
+                    }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        WantToReadRow(wantToRead, onSeeAll = onOpenReadingList, onOpenBook = open)
                     }
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Text(
@@ -227,6 +237,7 @@ private fun Header(
     onToggleLayout: () -> Unit,
     onRescan: () -> Unit,
     onChangeFolder: () -> Unit,
+    onOpenReadingList: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -243,6 +254,7 @@ private fun Header(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Want to Read") }, onClick = { menu = false; onOpenReadingList() })
                 DropdownMenuItem(text = { Text("Scan for New Books") }, onClick = { menu = false; onRescan() })
                 DropdownMenuItem(text = { Text("Change Folder") }, onClick = { menu = false; onChangeFolder() })
             }
