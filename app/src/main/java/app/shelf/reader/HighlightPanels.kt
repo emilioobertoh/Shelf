@@ -199,7 +199,7 @@ private fun QuoteWithBar(highlight: Highlight, theme: PageTheme, maxLines: Int) 
     }
 }
 
-/** The Highlights tab of the contents panel, in book order. */
+/** The Highlights tab of the contents panel, newest first. */
 @Composable
 internal fun HighlightsList(
     highlights: List<Highlight>,

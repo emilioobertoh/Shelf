@@ -20,6 +20,11 @@ data class ReaderSettings(
     val lineHeight: Double = 1.5,
     val margins: Double = 1.0,
     val justify: Boolean = true,
+    /**
+     * Off by default: with it on, Chrome misplaces the start handle when a selection begins
+     * at the very start of a paragraph that has hyphenated lines.
+     */
+    val hyphenate: Boolean = false,
 )
 
 data class Goals(
@@ -60,6 +65,7 @@ class SettingsStore(private val context: Context) {
         val lineHeight = doublePreferencesKey("reader_line_height")
         val margins = doublePreferencesKey("reader_margins")
         val justify = booleanPreferencesKey("reader_justify")
+        val hyphenate = booleanPreferencesKey("reader_hyphenate")
         val dailyMinutes = intPreferencesKey("goal_daily_minutes")
         val yearlyBooks = intPreferencesKey("goal_yearly_books")
         val libraryTree = stringPreferencesKey("library_tree_uri")
@@ -81,6 +87,7 @@ class SettingsStore(private val context: Context) {
             lineHeight = p[Keys.lineHeight] ?: d.lineHeight,
             margins = p[Keys.margins] ?: d.margins,
             justify = p[Keys.justify] ?: d.justify,
+            hyphenate = p[Keys.hyphenate] ?: d.hyphenate,
         )
     }
 
@@ -138,6 +145,7 @@ class SettingsStore(private val context: Context) {
         p[Keys.lineHeight] = s.lineHeight
         p[Keys.margins] = s.margins
         p[Keys.justify] = s.justify
+        p[Keys.hyphenate] = s.hyphenate
     }
 
     suspend fun saveGoals(g: Goals) = context.dataStore.edit { p ->

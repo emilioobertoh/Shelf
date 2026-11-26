@@ -468,6 +468,17 @@ private fun AppearancePanel(
                     colors = SwitchDefaults.colors(checkedTrackColor = theme.accent),
                 )
             }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Hyphenation", color = theme.chromeText, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = settings.hyphenate,
+                    onCheckedChange = { onChange(settings.copy(hyphenate = it)) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = theme.accent),
+                )
+            }
         }
     }
 }

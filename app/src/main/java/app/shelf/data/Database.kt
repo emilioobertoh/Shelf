@@ -158,7 +158,7 @@ interface SessionDao {
 
 @Dao
 interface HighlightDao {
-    @Query("SELECT * FROM highlights WHERE bookId = :bookId ORDER BY sortKey, createdAt")
+    @Query("SELECT * FROM highlights WHERE bookId = :bookId ORDER BY createdAt DESC")
     fun observeForBook(bookId: Long): Flow<List<HighlightEntity>>
 
     @Insert

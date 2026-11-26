@@ -90,6 +90,7 @@ fun ReaderSettings.toEpubPreferences(): EpubPreferences {
         lineHeight = lineHeight,
         pageMargins = margins,
         textAlign = if (justify) TextAlign.JUSTIFY else TextAlign.START,
+        hyphens = hyphenate,
         publisherStyles = false,
         scroll = false,
     )

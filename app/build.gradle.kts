@@ -6,6 +6,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Secrets (Google Books key, release signing) live in local.properties, which git ignores.
+val local = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+
 android {
     namespace = "app.shelf"
     compileSdk = 37
@@ -14,14 +19,30 @@ android {
         applicationId = "app.shelf"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
 
         // Optional Google Books key for the reading list search, kept out of git in local.properties.
-        val local = Properties().apply {
-            rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
-        }
         buildConfigField("String", "GOOGLE_BOOKS_KEY", "\"${local.getProperty("GOOGLE_BOOKS_KEY", "")}\"")
+    }
+
+    signingConfigs {
+        local.getProperty("RELEASE_STORE_FILE")?.let { path ->
+            create("release") {
+                storeFile = file(path)
+                storePassword = local.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = local.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = local.getProperty("RELEASE_STORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // No R8 shrinking: Readium and Room rely on reflection, and the size win isn't worth the risk.
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
 
     compileOptions {

@@ -2,6 +2,7 @@ package app.shelf
 
 import android.app.Application
 import android.content.Context
+import android.webkit.WebView
 import app.shelf.data.BookSearch
 import app.shelf.data.LibraryScanner
 import app.shelf.data.ReadiumServices
@@ -46,6 +47,8 @@ class ShelfApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Lets Chrome's DevTools inspect the reader page in debug builds.
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         db = ShelfDatabase.create(this)
         settings = SettingsStore(this)
         readium = ReadiumServices(this)

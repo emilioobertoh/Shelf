@@ -98,6 +98,13 @@ class ReaderActivity : AppCompatActivity() {
             EpubNavigatorFactory(openBook.publication).createFragmentFactory(
                 initialLocator = openBook.initialLocator,
                 initialPreferences = openBook.settings.toEpubPreferences(),
+                paginationListener = object : EpubNavigatorFragment.PaginationListener {
+                    // A chapter finished loading. The first page change can fire before that,
+                    // and a script sent then is lost, so send them again here.
+                    override fun onPageLoaded() {
+                        if (::navigator.isInitialized) lifecycleScope.launch { injectPageScripts() }
+                    }
+                },
                 configuration = readerConfiguration(selectionCallback),
             )
 
@@ -381,8 +388,7 @@ class ReaderActivity : AppCompatActivity() {
                 var first = true
                 navigator.currentLocator.collect { locator ->
                     ui.locator = locator
-                    // Each chapter is its own WebView; the script guards against running twice.
-                    navigator.evaluateJavascript(SELECTION_SCROLL_LOCK)
+                    injectPageScripts()
                     if (first) first = false else tracker.onPageTurn()
 
                     val progress = locator.locations.totalProgression ?: 0.0
@@ -396,6 +402,12 @@ class ReaderActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** Each chapter is its own WebView; both scripts guard against running twice. */
+    private suspend fun injectPageScripts() {
+        navigator.evaluateJavascript(SELECTION_SCROLL_LOCK)
+        navigator.evaluateJavascript(REPAINT_ONCE)
     }
 
     override fun onStart() {
@@ -473,6 +485,27 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         private const val NAVIGATOR_TAG = "navigator"
+
+        /**
+         * Chrome sometimes paints a chapter from a stale first layout: a list item that runs onto
+         * the next page gets drawn over the item after it, though the layout itself is right.
+         * Repainting the page once, after the fonts have loaded, draws it where it belongs.
+         */
+        private val REPAINT_ONCE = """
+            (function() {
+              if (window.__shelfRepainted) return;
+              window.__shelfRepainted = true;
+              var frame = function() {
+                return new Promise(function(r) { requestAnimationFrame(function() { requestAnimationFrame(r); }); });
+              };
+              document.fonts.ready.then(frame).then(function() {
+                document.body.style.setProperty('opacity', '0.999');
+                return frame();
+              }).then(function() {
+                document.body.style.removeProperty('opacity');
+              });
+            })();
+        """.trimIndent()
 
         /**
          * Paginated chapters are one wide page of CSS columns. While a selection handle is dragged,

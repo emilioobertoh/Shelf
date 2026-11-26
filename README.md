@@ -8,8 +8,8 @@ A local-first EPUB reader for Android, modelled on Apple Books. Point it at a fo
 - **Reader:** paginated reading with tap and swipe page turns, a table of contents, and a scrubber to jump anywhere.
   - Themes: Original, Sepia, Quiet and Night.
   - Fonts: the book's own, Charter, Literata, Source Serif or Sans Serif.
-  - Text size, line spacing, margins and justification.
-- **Highlights and notes:** select text to highlight it in one of five colours or add a note. Tap a highlight to change or delete it, and find them all, in book order, under Contents → Highlights.
+  - Text size, line spacing, margins, justification and hyphenation (off by default, because Android's WebView misplaces a selection handle when it's on).
+- **Highlights and notes:** select text to highlight it in one of five colours or add a note. Tap a highlight to change or delete it, and find them all, newest first, under Contents → Highlights.
 - **Want to Read:** search for books by title, author or ISBN and keep a list of what to read next, with covers and descriptions saved for offline use. English editions come first, then Spanish ones. Books you already have show as In Library.
 - **Reading goals:** a daily minutes goal with a progress ring, the last 7 days, streaks, and a yearly books goal. Reading time is only counted while you're actually turning pages.
 - **Morning reminder:** a daily notification with your goal and current book; tap it to open the book where you left off.
@@ -23,7 +23,25 @@ Needs JDK 21 and the Android SDK (compile SDK 37). Shelf runs on Android 8.0 (AP
 ./gradlew installDebug
 ```
 
-This builds a debug APK and installs it on a connected device. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+This builds a debug APK and installs it on a connected device. The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Debug builds let Chrome's DevTools inspect the reader page (`chrome://inspect`).
+
+### Release build
+
+To share an APK, sign it with your own key. Add the keystore details to `local.properties` (not committed):
+
+```properties
+RELEASE_STORE_FILE=/path/to/release.jks
+RELEASE_STORE_PASSWORD=your-password
+RELEASE_KEY_ALIAS=your-alias
+```
+
+Then run:
+
+```bash
+./gradlew assembleRelease
+```
+
+The signed APK is written to `app/build/outputs/apk/release/app-release.apk`. Updates only install over an existing copy if they're signed with the same key and have a higher `versionCode`, so keep a backup of the keystore.
 
 ### Book search
 
